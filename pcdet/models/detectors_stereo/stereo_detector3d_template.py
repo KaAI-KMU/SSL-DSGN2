@@ -7,7 +7,7 @@ import numpy as np
 from pcdet.models.model_utils import model_nms_utils
 from pcdet.utils.common_utils import create_logger
 from pcdet.ops.iou3d_nms import iou3d_nms_utils
-from pcdet.models import backbones_2d, backbones_3d_stereo, dense_heads
+from pcdet.models import backbones_2d, backbones_3d_stereo, dense_heads, roi_heads
 from pcdet.models.backbones_2d import map_to_bev
 from pcdet.models.dense_heads.depth_loss_head import DepthLossHead
 from pcdet.models.dense_heads.voxel_loss_head import VoxelLossHead
@@ -25,7 +25,7 @@ class StereoDetector3DTemplate(nn.Module):
         self.module_topology = [
             'backbone_3d', 'map_to_bev_module',
             'backbone_2d', 'dense_head_2d', 'dense_head', 
-            'depth_loss_head', 'voxel_loss_head', 
+            'depth_loss_head', 'voxel_loss_head', 'roi_head'
         ]
         if 'DENSE_HEAD' in self.model_cfg and getattr(self.model_cfg.DENSE_HEAD, 'do_feature_imitation', False):
             if hasattr(self.model_cfg, 'LIDAR_MODEL'):
@@ -58,7 +58,8 @@ class StereoDetector3DTemplate(nn.Module):
             'voxel_size': getattr(self.dataset, 'stereo_voxel_size', self.dataset.voxel_size),
             'boxes_gt_in_cam2_view': getattr(self.dataset, 'boxes_gt_in_cam2_view', False),
             'stereo_point_cloud_range': self.dataset.stereo_point_cloud_range,
-            'max_crop_shape': getattr(self.dataset, 'max_crop_shape', None)
+            'max_crop_shape': getattr(self.dataset, 'max_crop_shape', None),
+            'num_point_features': self.dataset.point_feature_encoder.num_point_features
         }
 
         for module_name in self.module_topology:
@@ -223,6 +224,21 @@ class StereoDetector3DTemplate(nn.Module):
         )
         model_info_dict['module_list'].append(voxel_loss_head)
         return voxel_loss_head, model_info_dict
+    
+    def build_roi_head(self, model_info_dict):
+        if self.model_cfg.get('ROI_HEAD', None) is None:
+            return None, model_info_dict
+        point_head_module = roi_heads.__all__[self.model_cfg.ROI_HEAD.NAME](
+            model_cfg=self.model_cfg.ROI_HEAD,
+            input_channels=model_info_dict['num_point_features'],
+            backbone_channels= model_info_dict.get('backbone_channels', None),
+            point_cloud_range=model_info_dict['point_cloud_range'],
+            voxel_size=model_info_dict['voxel_size'],
+            num_class=self.num_class if not self.model_cfg.ROI_HEAD.CLASS_AGNOSTIC else 1,
+        )
+
+        model_info_dict['module_list'].append(point_head_module)
+        return point_head_module, model_info_dict
 
     def forward(self, **kwargs):
         raise NotImplementedError
@@ -268,12 +284,28 @@ class StereoDetector3DTemplate(nn.Module):
 
                 if not batch_dict['cls_preds_normalized']:
                     cls_preds = torch.sigmoid(cls_preds)
+            # else:
+            #     cls_preds = [x[batch_mask]
+            #                  for x in batch_dict['batch_cls_preds']]
+            #     src_cls_preds = cls_preds
+            #     if not batch_dict['cls_preds_normalized']:
+            #         cls_preds = [torch.sigmoid(x) for x in cls_preds]
+
+            if self.roi_head is not None and not isinstance(batch_dict['batch_iou_preds'], list):
+                iou_preds = batch_dict['batch_iou_preds'][batch_mask]
+
+                src_iou_preds = iou_preds
+
+                if not batch_dict['iou_preds_normalized']:
+                    iou_preds = torch.sigmoid(iou_preds)                    
             else:
-                cls_preds = [x[batch_mask]
-                             for x in batch_dict['batch_cls_preds']]
-                src_cls_preds = cls_preds
-                if not batch_dict['cls_preds_normalized']:
-                    cls_preds = [torch.sigmoid(x) for x in cls_preds]
+                if self.roi_head is not None:
+                    iou_preds = [x[batch_mask]
+                                for x in batch_dict['batch_iou_preds']]
+                    src_iou_preds = iou_preds
+
+                    if not batch_dict['iou_preds_normalized']:
+                        iou_preds = [torch.sigmoid(x) for x in iou_preds]
 
             if post_process_cfg.NMS_CONFIG.MULTI_CLASSES_NMS:
                 if not isinstance(cls_preds, list):
@@ -310,8 +342,11 @@ class StereoDetector3DTemplate(nn.Module):
                 final_scores = torch.cat(pred_scores, dim=0)
                 final_labels = torch.cat(pred_labels, dim=0)
                 final_boxes = torch.cat(pred_boxes, dim=0)
+                if self.roi_head is not None:
+                    final_iou_scores = iou_preds[selected]
             else:
                 cls_preds, label_preds = torch.max(cls_preds, dim=-1)
+                iou_preds, iou_label_preds = torch.max(iou_preds, dim=-1)
                 if batch_dict.get('has_class_labels', False):
                     label_key = 'roi_labels' if 'roi_labels' in batch_dict else 'batch_pred_labels'
                     label_preds = batch_dict[label_key][index]
@@ -330,12 +365,20 @@ class StereoDetector3DTemplate(nn.Module):
                 final_scores = selected_scores
                 final_labels = label_preds[selected]
                 final_boxes = box_preds[selected]
+                if self.roi_head is not None:
+                    final_cls_scores = cls_preds[selected]
+                    final_iou_scores = iou_preds[selected]
 
             record_dict = {
                 'pred_boxes': final_boxes,
                 'pred_scores': final_scores,
                 'pred_labels': final_labels,
             }
+            if self.roi_head is not None:
+                record_dict = {
+                    'pred_cls_scores': final_cls_scores,
+                    'pred_iou_scores': final_iou_scores                    
+                }
 
             recall_dict, iou_results, ioubev_results = self.generate_recall_record(
                 box_preds=final_boxes if 'rois' not in batch_dict else src_box_preds,

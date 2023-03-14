@@ -10,6 +10,7 @@ class STEREO(StereoDetector3DTemplate):
         self.module_list = self.build_networks()
 
     def forward(self, batch_dict):
+        batch_dict['dataset_cfg'] = self.dataset.dataset_cfg
         with T(self.__module__.split('.')[-1], record=True, enable=not self.training):
             for cur_module in self.module_list:
                 with T(cur_module.__module__.split('.')[-1], enable=not self.training):
