@@ -112,6 +112,11 @@ class STEREO(StereoDetector3DTemplate):
             tb_dict['loss_rcnn'] = loss_rcnn.item()
             loss += loss_rcnn
 
+        if self.model_cfg.get('DEPTH_CONFIDENCE_MODULE', None):
+            loss_dcm, tb_dict = self.depth_confidence_module.get_loss(tb_dict)
+            tb_dict['loss_dcm'] = loss_dcm.item()
+            loss += loss_dcm
+
         return loss, tb_dict, disp_dict
 
     def get_iou_map(self, batch_dict):

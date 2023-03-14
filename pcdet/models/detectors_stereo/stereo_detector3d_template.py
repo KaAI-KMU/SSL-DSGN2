@@ -7,7 +7,7 @@ import numpy as np
 from pcdet.models.model_utils import model_nms_utils
 from pcdet.utils.common_utils import create_logger
 from pcdet.ops.iou3d_nms import iou3d_nms_utils
-from pcdet.models import backbones_2d, backbones_3d_stereo, dense_heads, roi_heads
+from pcdet.models import backbones_2d, backbones_3d_stereo, dense_heads, roi_heads, depth_confidence_modules
 from pcdet.models.backbones_2d import map_to_bev
 from pcdet.models.dense_heads.depth_loss_head import DepthLossHead
 from pcdet.models.dense_heads.voxel_loss_head import VoxelLossHead
@@ -25,7 +25,7 @@ class StereoDetector3DTemplate(nn.Module):
         self.module_topology = [
             'backbone_3d', 'map_to_bev_module',
             'backbone_2d', 'dense_head_2d', 'dense_head', 
-            'depth_loss_head', 'voxel_loss_head', 'roi_head'
+            'depth_loss_head', 'voxel_loss_head', 'roi_head', 'depth_confidence_module'
         ]
         if 'DENSE_HEAD' in self.model_cfg and getattr(self.model_cfg.DENSE_HEAD, 'do_feature_imitation', False):
             if hasattr(self.model_cfg, 'LIDAR_MODEL'):
@@ -239,6 +239,15 @@ class StereoDetector3DTemplate(nn.Module):
 
         model_info_dict['module_list'].append(point_head_module)
         return point_head_module, model_info_dict
+    
+    def build_depth_confidence_module(self,model_info_dict):
+        if self.model_cfg.get('DEPTH_CONFIDENCE_MODULE', None) is None:
+            return None, model_info_dict
+        depth_confidence_module = depth_confidence_modules.__all__[self.model_cfg.DEPTH_CONFIDENCE_MODULE.NAME](
+            model_cfg = self.model_cfg.DEPTH_CONFIDENCE_MODULE,
+        )
+        model_info_dict['module_list'].append(depth_confidence_module)
+        return depth_confidence_module, model_info_dict
 
     def forward(self, **kwargs):
         raise NotImplementedError

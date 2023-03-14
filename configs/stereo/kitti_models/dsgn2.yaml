@@ -335,6 +335,11 @@ MODEL:
                 'code_weights': [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
             }
 
+    DEPTH_CONFIDENCE_MODULE:
+        NAME: CCNN
+        FC_FILTERS: 128
+        LOSS_WEIGHTS: 0.5
+
     POST_PROCESSING:
         RECALL_THRESH_LIST: [0.3, 0.5, 0.7]
         SCORE_THRESH: 0.1

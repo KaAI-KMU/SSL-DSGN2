@@ -276,6 +276,15 @@ class Calibration(object):
             (x.reshape(-1, 8, 1), y.reshape(-1, 8, 1)), axis=2)
 
         return boxes, boxes_corner
+    
+    def depth_to_disparity(self, depth_map):
+        depth_map = depth_map.astype(np.float32)
+
+        img_shape = depth_map.shape[1:]
+        disparity_map = np.zeros(img_shape, dtype=np.int32)
+        disparity_map = self.fu_mul_baseline/depth_map
+        
+        return disparity_map
 
 
 def unproject_depth_map_to_3d(depth_map, calib, image=None):
