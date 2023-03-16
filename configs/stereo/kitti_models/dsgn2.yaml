@@ -286,7 +286,7 @@ MODEL:
         LOSS_TYPE: {'ce': 1.0}
         WEIGHTS: [1.0]  # [1.0, 1.0]
 
-        ROI_HEAD:
+    ROI_HEAD:
         NAME: SECONDHead
         CLASS_AGNOSTIC: True
 
