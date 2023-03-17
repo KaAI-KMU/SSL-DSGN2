@@ -7,6 +7,12 @@ from skimage import io
 from pcdet.utils import box_utils, calibration_kitti, common_utils, object3d_kitti, depth_map_utils
 from pcdet.datasets.stereo_dataset_template import StereoDatasetTemplate
 
+from pathlib import Path
+from ...ops.roiaware_pool3d import roiaware_pool3d_utils
+from pcdet.ops.iou3d_nms import iou3d_nms_utils
+from tools.work_utils import unproject_depth, project_bbox3d, generate_global_points, restore_image, segmentation, project, make_projected_idx
+import cv2
+
 class StereoKittiDataset(StereoDatasetTemplate):
     def __init__(self, dataset_cfg, class_names, training=True, root_path=None, logger=None):
         """
@@ -38,6 +44,10 @@ class StereoKittiDataset(StereoDatasetTemplate):
 
         self.kitti_infos = []
         self.include_kitti_data(self.mode)
+
+        self.pseudo_database_save_path = Path('pseudo_gt_database')
+        self.pseudo_db_info_save_path = Path('pseudo_kitti_dbinfos.pkl')
+        self.clear_pseudo_database()
 
     def include_kitti_data(self, mode):
         if self.logger is not None:
@@ -388,3 +398,189 @@ class StereoKittiDataset(StereoDatasetTemplate):
 
         data_dict['image_shape'] = img_shape
         return data_dict
+    
+    def get_batch_database(self, batch, pred_dicts, gt_database):
+        import torch
+
+        for i in range(batch['batch_size']):
+            if pred_dicts[i]['pred_boxes'].shape[0] == 0:
+                continue
+            calib = batch['calib'][i]
+            baseline = calib.fu_mul_baseline/calib.fu
+
+            pseudo_boxes, selected = filter_correct_preds(pred_dicts[i]['pred_boxes'], pred_dicts[i]['pred_labels'], batch['gt_boxes'][i])
+            num_obj = pseudo_boxes.shape[0]
+            sample_idx = batch['frame_id'][i].item()
+            points = batch['points'][batch['points'][:,0] == i]
+            names = [self.class_names[pred_dicts[i]['pred_labels'][k].item()-1] for k in selected]
+            difficulty = [0 for i in range(num_obj)]
+            bbox3d = pseudo_boxes
+            bbox = np.array([[0., 0., 0., 0.] for _ in range(num_obj)])
+            score = [-1.0 for i in range(num_obj)]
+
+            # point_indices = roiaware_pool3d_utils.points_in_boxes_cpu(
+            #     points[:,1:].cpu(), bbox3d.cpu()
+            # ).numpy()
+
+            left_img = restore_image(batch['left_img'][0].cpu().numpy())
+            right_img = restore_image(batch['right_img'][0].cpu().numpy())
+            image_shape = (left_img.shape[0], left_img.shape[1])
+
+            left_depth_map= pred_dicts[i]['batch_dict']['depth_preds'][0]
+            left_depth_map = torch.tensor(np.transpose(left_depth_map.cpu().numpy(), (1, 2, 0)))
+            # right_depth_map = get_right_depth_map(left_depth_map, calib)
+            
+            # pseudo_pcloud = unproject_depth(left_depth_map.squeeze(axis=2).cpu().numpy(), calib)
+            # draw_scenes(pseudo_pcloud, ref_boxes=pred_dicts[0]['pred_boxes'])
+
+            for k in range(num_obj):
+                left_points = torch.FloatTensor(generate_global_points(bbox3d[k].cpu()))
+                right_points = copy.deepcopy(left_points)
+                right_points[:,1] = left_points[:,1] + baseline
+
+                cropped_left_bbox, cropped_right_bbox = project_bbox3d(left_points, calib)
+                left_bbox_hw = [0, 0, cropped_left_bbox[2]-cropped_left_bbox[0], cropped_left_bbox[3]-cropped_left_bbox[1]]
+                right_bbox_hw = [0, 0, cropped_right_bbox[2]-cropped_right_bbox[0], cropped_right_bbox[3]-cropped_right_bbox[1]]
+
+                left_x1, left_y1, left_x2, left_y2 = int(cropped_left_bbox[0]), int(cropped_left_bbox[1]), int(cropped_left_bbox[2]), int(cropped_left_bbox[3])
+                right_x1, right_y1, right_x2, right_y2 = int(cropped_right_bbox[0]), int(cropped_right_bbox[1]), int(cropped_right_bbox[2]), int(cropped_right_bbox[3])
+
+                left_roi_mask = np.zeros(image_shape, dtype=np.uint8)
+                left_roi_mask[left_y1: left_y2+1, left_x1:left_x2+1] = np.ones((left_y2-left_y2+1, left_x2-left_x1+1), dtype=np.uint8)
+                left_roi = left_roi_mask * np.array(torch.squeeze(left_depth_map))
+                left_object = unproject_depth(left_roi, calib)
+                left_selected_points, left_mask, right_mask = segmentation(left_object, bbox3d[k].cpu(), calib)
+                exist_in_bbox_idx = roiaware_pool3d_utils.points_in_boxes_cpu(left_selected_points, bbox3d[k].cpu().unsqueeze(axis=0)).numpy()
+                left_selected_points = left_selected_points[exist_in_bbox_idx.squeeze() > 0]
+
+                left_copy_image = copy.deepcopy(left_img)
+                right_copy_image = copy.deepcopy(right_img)
+
+                # left_segmentation_mask = np.zeros(image_shape, dtype=np.uint8)
+                # left_min_depth = left_points[:, 0].min().numpy()
+                # left_max_depth = left_points[:, 0].max().numpy()
+                # diff = (left_max_depth - left_min_depth)*0.05
+                # depth_mask = (left_depth_map[:, :, 0] >= left_min_depth - diff) & (left_depth_map[:, :, 0] <= left_max_depth + diff)
+                # left_segmentation_mask[left_y1:(left_y2+1), left_x1:(left_x2+1)][depth_mask[left_y1:(left_y2+1), left_x1:(left_x2+1)]] = 1
+
+                # right_segmentation_mask = np.zeros(image_shape, dtype=np.uint8)
+                # right_min_depth = right_points[:, 0].min().numpy()
+                # right_max_depth = right_points[:, 0].max().numpy()
+                # diff = (right_max_depth - right_min_depth)*0.05
+                # depth_mask = (right_depth_map[:, :, 0] >= right_min_depth - diff) & (right_depth_map[:, :, 0] <= right_max_depth + diff)
+                # right_segmentation_mask[right_y1:(right_y2+1), right_x1:(right_x2+1)][depth_mask[right_y1:(right_y2+1), right_x1:(right_x2+1)]] = 1
+                # interpolate_matrix = np.ones((3,3), dtype=float)/9
+                # right_segmentation_mask = cv2.filter2D(right_segmentation_mask, -1, interpolate_matrix)
+
+                # left_copy_image *= left_segmentation_mask[..., None]
+                # right_copy_image *= right_segmentation_mask[..., None]
+
+                left_roi = np.array(left_copy_image[left_y1:left_y2+1,left_x1:left_x2+1,:])
+                right_roi = np.array(right_copy_image[right_y1:right_y2+1,right_x1:right_x2+1,:])
+
+                interpolate_matrix = np.ones((3,3), dtype=float)/9
+                left_mask = cv2.filter2D(left_mask, -1, interpolate_matrix)
+                right_mask = cv2.filter2D(right_mask, -1, interpolate_matrix)
+
+                left_segmentation_mask = left_mask[left_y1:left_y2+1,left_x1:left_x2+1]
+                right_segmentation_mask = right_mask[right_y1:right_y2+1,right_x1:right_x2+1]
+
+                filename = '%s_%s_%d' % (sample_idx, names[k], k)
+                filepath = self.pseudo_database_save_path / filename
+
+                dummy = np.zeros((left_selected_points.shape[0], 1))
+                left_selected_points = np.hstack((left_selected_points, dummy))
+
+                object_points = left_selected_points.astype(np.float32)
+                object_points[:, :3] -= bbox3d[k, :3].cpu().numpy()
+
+                # gt_points = points[point_indices[k] > 0]
+                # gt_points = torch.cat([gt_points[:,1:], gt_points[:,:1]], dim=1)
+                # from visual_utils.open3d_vis_utils import draw_scenes
+                # draw_scenes(object_points)
+
+                # cv2.imshow('tmp', np.expand_dims(tmp.astype(np.uint8), axis=2))
+                # cv2.waitKey(0)
+
+                db_path = str(filepath) + '.bin'
+                cropped_left_img_path = str(self.root_path / self.pseudo_database_save_path) + '/images/' + 'left_' + filename + '.jpg'
+                cropped_right_img_path = str(self.root_path / self.pseudo_database_save_path) + '/images/' + 'right_' + filename + '.jpg'
+                cropped_left_mask_path = str(self.root_path / self.pseudo_database_save_path) + '/masks/' + 'left_' + filename + '.npy'
+                cropped_right_mask_path = str(self.root_path / self.pseudo_database_save_path) + '/masks/' + 'right_' + filename + '.npy'
+
+                with open(self.root_path / db_path, 'w') as f:
+                    object_points.tofile(f)
+                cv2.imwrite(cropped_left_img_path, left_roi)
+                np.save(cropped_left_mask_path, left_segmentation_mask)
+                cv2.imwrite(cropped_right_img_path, right_roi)
+                np.save(cropped_right_mask_path, right_segmentation_mask)
+
+                cropped_left_img_path = str(self.pseudo_database_save_path) + '/images/' + 'left_' + filename + '.jpg'
+                cropped_right_img_path = str(self.pseudo_database_save_path) + '/images/' + 'right_' + filename + '.jpg'
+                cropped_left_mask_path = str(self.pseudo_database_save_path) + '/masks/' + 'left_' + filename + '.npy'
+                cropped_right_mask_path = str(self.pseudo_database_save_path) + '/masks/' + 'right_' + filename + '.npy'
+
+                db_info = {'name': names[k], 'path': db_path, 'image_idx': sample_idx, 'gt_idx': k, 
+                'box3d_lidar': bbox3d[k].cpu().numpy(), 'num_points_in_gt': object_points.shape[0],
+                'difficulty': difficulty[k], 'bbox': bbox[k], 'score': score[k],
+                'cropped_left_bbox': left_bbox_hw, 'cropped_left_img_path': cropped_left_img_path, 'cropped_left_mask_path': cropped_left_mask_path,
+                'cropped_right_bbox': right_bbox_hw, 'cropped_right_img_path': cropped_right_img_path, 'cropped_right_mask_path': cropped_right_mask_path}
+
+                gt_database[names[k]].append(db_info)
+        
+        return gt_database
+
+    def save_pseudo_database(self, pseudo_db_infos):
+        with open(self.root_path / self.pseudo_db_info_save_path, 'wb') as f:
+            pickle.dump(pseudo_db_infos, f)
+
+
+    def get_empty_pseudo_database(self):
+        pseudo_db_infos = {}
+        for cls in self.class_names:
+            pseudo_db_infos[cls] = []
+        return pseudo_db_infos
+
+
+    def clear_pseudo_database(self):
+        import os
+
+        pseudo_gt_database_path = self.root_path / self.pseudo_database_save_path
+        images_path = pseudo_gt_database_path / 'images'
+        masks_path = pseudo_gt_database_path / 'masks'
+
+        pseudo_gt_database_path.mkdir(parents=True, exist_ok=True)
+
+        path_list = [pseudo_gt_database_path, images_path, masks_path]
+
+        for rm_path in path_list:
+            files = os.listdir(rm_path)
+
+            for file in files:
+                file_path = os.path.join(rm_path, file)
+                try:
+                    if os.path.isdir(file_path):
+                        continue
+                    os.remove(file_path)
+                except Exception as e:
+                    print(f"Failed to delete {file_path} with error: {e}")
+
+        images_path.mkdir(parents=True, exist_ok=True)
+        masks_path.mkdir(parents=True, exist_ok=True)        
+    
+
+# Temporary use for testing pseudo gt sampling with segmentation
+def filter_correct_preds(pred_boxes, pred_labels, gt_boxes):
+    assert pred_boxes.shape[0] != 0
+    assert pred_boxes.shape[1] == 7
+    assert gt_boxes.shape[1] == 8
+    assert pred_labels.shape.__len__() == 1
+
+    correct_thresh = [0.7, 0.5, 0.5] # for [Car, Pedestrian, Cyclist]
+
+    iou = iou3d_nms_utils.boxes_bev_iou_cpu(pred_boxes.cpu(), gt_boxes[:,:-1].cpu())
+    thresh_list = [correct_thresh[pred_labels[i]-1] for i in range(pred_boxes.shape[0])]
+    valid_mask = np.where(iou.max(dim=1).values.cpu().numpy() > thresh_list)[0]
+    sampled_boxes = pred_boxes[valid_mask]
+
+    return sampled_boxes, valid_mask

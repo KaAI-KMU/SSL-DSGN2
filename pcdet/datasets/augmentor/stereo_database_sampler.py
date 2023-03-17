@@ -6,6 +6,8 @@ import pickle
 from pcdet.utils import box_utils
 from pcdet.ops.iou3d_nms import iou3d_nms_utils
 from pcdet.ops.roiaware_pool3d import roiaware_pool3d_utils
+from pcdet.utils.depth_map_utils import points_to_depth_map
+from tools.work_utils import unproject_depth
 
 from skimage import io
 import cv2
@@ -77,6 +79,8 @@ class DataBaseSampler(object):
         self.limit_whole_scene = sampler_cfg.get('LIMIT_WHOLE_SCENE', False)
         self.filter_occlusion_overlap = sampler_cfg.get('filter_occlusion_overlap', 1.)
         self.far_to_near = getattr(self.sampler_cfg, 'far_to_near', False)
+
+        self.seg = sampler_cfg.get('segmentation', False)
 
         for x in sampler_cfg.SAMPLE_GROUPS:
             class_name, sample_num = x.split(':')
@@ -309,6 +313,11 @@ class DataBaseSampler(object):
         sampled_mask = np.zeros((0,), dtype=bool)
         check_overlap_boxes = np.zeros((0, 4), dtype=float)
         check_overlap_boxes = np.append(check_overlap_boxes, data_dict['gt_annots_boxes_2d'], axis=0)
+
+        # ----------------------------------------------------------------------------------------------------------------------------------------------
+        points_select_mask = np.ones((left_img.shape[0], left_img.shape[1]), dtype=int)
+        # ----------------------------------------------------------------------------------------------------------------------------------------------
+
         for idx, info in enumerate(total_valid_sampled_dict):
             file_path = self.root_path / info['path']
             
@@ -321,16 +330,50 @@ class DataBaseSampler(object):
                 obj_points[:, 2] -= mv_height[idx]
 
             ### read images
-            cropped_left_img = io.imread(self.root_path / info['cropped_left_img_path'])
-            cropped_right_img = io.imread(self.root_path / info['cropped_right_img_path'])
-            cropped_left_bbox = info['cropped_left_bbox']
-            cropped_right_bbox = info['cropped_right_bbox']
+            # cropped_left_img = io.imread(self.root_path / info['cropped_left_img_path'])
+            # cropped_right_img = io.imread(self.root_path / info['cropped_right_img_path'])
+
+            # ----------------------------------------------------------------------------------------------------------------------------------------------
+            ### modified
+            if self.seg:
+                # cropped_left_img = io.imread('/home/hj/Desktop/vs/DSGN2/data/roi/left_crop_img/' + info['cropped_left_img_path'].split('/')[-1])
+                # cropped_right_img = io.imread('/home/hj/Desktop/vs/DSGN2/data/roi/right_crop_img/' + info['cropped_right_img_path'].split('/')[-1])
+                # left_segmentation_mask_path = "/home/hj/Desktop/vs/DSGN2/data/seg_mask/left_seg_mask/" + info['cropped_left_img_path'].split('/')[-1].split('.')[0] + ".npy" #TODO
+                # right_segmentation_mask_path = "/home/hj/Desktop/vs/DSGN2/data/seg_mask/right_seg_mask/" + info['cropped_right_img_path'].split('/')[-1].split('.')[0] + ".npy" #TODO
+                # left_segmentation_mask = np.load(left_segmentation_mask_path).reshape(cropped_left_img.shape[0], cropped_left_img.shape[1])
+                # right_segmentation_mask = np.load(right_segmentation_mask_path).reshape(cropped_right_img.shape[0], cropped_right_img.shape[1])
+
+                cropped_left_img = io.imread(self.root_path / info['cropped_left_img_path'])
+                cropped_right_img = io.imread(self.root_path / info['cropped_right_img_path'])
+                left_segmentation_mask = np.load(self.root_path / info['cropped_left_mask_path']).reshape(cropped_left_img.shape[0], cropped_left_img.shape[1])
+                right_segmentation_mask = np.load(self.root_path / info['cropped_right_mask_path']).reshape(cropped_right_img.shape[0], cropped_right_img.shape[1])
+
+                
+            else:
+                cropped_left_img = io.imread(self.root_path / info['cropped_left_img_path'])
+                cropped_right_img = io.imread(self.root_path / info['cropped_right_img_path'])
+            ### modified
+            # ----------------------------------------------------------------------------------------------------------------------------------------------
+
+            cropped_left_bbox = np.array(info['cropped_left_bbox']).astype(float)
+            cropped_right_bbox = np.array(info['cropped_right_bbox']).astype(float)
             cropped_left_bbox[[2,3]] -= 1 # fix bug of prepare dataset
             cropped_right_bbox[[2,3]] -= 1
 
             # if cropped_left_bbox[0] < 0. or cropped_left_bbox[1] < 0. or cropped_left_bbox[2] >= cropped_left_img.shape[1] - 1 or cropped_left_bbox[3] >= cropped_left_img.shape[0] - 1:
             #     continue
-            left_warped_img = warp(cropped_left_img, cropped_left_bbox, left_cropped_bbox[idx])
+            # left_warped_img = warp(cropped_left_img, cropped_left_bbox, left_cropped_bbox[idx])
+
+            # ----------------------------------------------------------------------------------------------------------------------------------------------
+            ### modified
+            if self.seg: #TODO
+                left_warped_img = warp(cropped_left_img, cropped_left_bbox, left_cropped_bbox[idx])
+                left_warped_mask = warp(left_segmentation_mask, cropped_left_bbox, left_cropped_bbox[idx])
+            else:
+                left_warped_img = warp(cropped_left_img, cropped_left_bbox, left_cropped_bbox[idx])
+            ### modified
+            # ----------------------------------------------------------------------------------------------------------------------------------------------
+
             max_bbox_h = min(left_warped_img.shape[0], left_img.shape[0]-left_bbox_img_int[idx, 1])
             max_bbox_w = min(left_warped_img.shape[1], left_img.shape[1]-left_bbox_img_int[idx, 0])
 
@@ -349,8 +392,28 @@ class DataBaseSampler(object):
             obj_points_img_list.append( calib.rect_to_img( calib.lidar_pseudo_to_rect(obj_points[:, :3]) )[0] )
             sampled_gt_indices.append(info['gt_idx'])
             sampled_gt_difficulty.append(info['difficulty'])
+            
+            # ----------------------------------------------------------------------------------------------------------------------------------------------
+            ### modified
+            if self.seg:#TODO
+                reversed_points_select_mask = np.abs(left_warped_mask.astype(np.int)-1)
+                points_select_mask[ left_bbox_img_int[idx, 1]:left_bbox_img_int[idx, 1]+max_bbox_h, left_bbox_img_int[idx, 0]:left_bbox_img_int[idx, 0]+max_bbox_w] = \
+                    points_select_mask[ left_bbox_img_int[idx, 1]:left_bbox_img_int[idx, 1]+max_bbox_h, left_bbox_img_int[idx, 0]:left_bbox_img_int[idx, 0]+max_bbox_w] * \
+                        reversed_points_select_mask[:max_bbox_h,:max_bbox_w]
 
-            left_img[ left_bbox_img_int[idx, 1]:left_bbox_img_int[idx, 1]+max_bbox_h, left_bbox_img_int[idx, 0]:left_bbox_img_int[idx, 0]+max_bbox_w ] = left_warped_img[:max_bbox_h, :max_bbox_w]
+                left_warped_mask = np.repeat(left_warped_mask[:, :, np.newaxis], 3, axis=2)
+                reversed_left_segmentation_mask = np.abs(left_warped_mask.astype(np.int)-1)
+
+                left_img[ left_bbox_img_int[idx, 1]:left_bbox_img_int[idx, 1]+max_bbox_h, left_bbox_img_int[idx, 0]:left_bbox_img_int[idx, 0]+max_bbox_w] \
+                    = left_img[ left_bbox_img_int[idx, 1]:left_bbox_img_int[idx, 1]+max_bbox_h, left_bbox_img_int[idx, 0]:left_bbox_img_int[idx, 0]+max_bbox_w] * \
+                        reversed_left_segmentation_mask[:max_bbox_h,:max_bbox_w] + (left_warped_img * left_warped_mask)[:max_bbox_h,:max_bbox_w]
+            else:
+                left_img[ left_bbox_img_int[idx, 1]:left_bbox_img_int[idx, 1]+max_bbox_h, left_bbox_img_int[idx, 0]:left_bbox_img_int[idx, 0]+max_bbox_w ] = left_warped_img[:max_bbox_h, :max_bbox_w]
+            
+            # left_img[ left_bbox_img_int[idx, 1]:left_bbox_img_int[idx, 1]+max_bbox_h, left_bbox_img_int[idx, 0]:left_bbox_img_int[idx, 0]+max_bbox_w ,:] = np.array([0,0,255])
+            ### modified
+            # ----------------------------------------------------------------------------------------------------------------------------------------------
+
             # print(f'left: origin size {left_warped_img.shape[1]}x{left_warped_img.shape[0]} final cropped box size{max_bbox_w}x{max_bbox_h}')
 
             if self.sampler_cfg.get('remove_overlapped', True):
@@ -363,13 +426,45 @@ class DataBaseSampler(object):
                     obj_points_list[j] = obj_points_list[j][non_overlapped_obj_mask]
 
             right_warped_img = warp(cropped_right_img, cropped_right_bbox, right_cropped_bbox[idx])
+
+            # ----------------------------------------------------------------------------------------------------------------------------------------------
+            ### modified
+            if self.seg:#TODO
+                right_warped_img = warp(cropped_right_img, cropped_right_bbox, right_cropped_bbox[idx])
+                right_warped_mask = warp(right_segmentation_mask, cropped_right_bbox, right_cropped_bbox[idx])
+            else:
+                right_warped_img = warp(cropped_right_img, cropped_right_bbox, right_cropped_bbox[idx])
+            ### modified
+            # ----------------------------------------------------------------------------------------------------------------------------------------------
+
             max_bbox_h = min(right_warped_img.shape[0], right_img.shape[0]-right_bbox_img_int[idx, 1])
             max_bbox_w = min(right_warped_img.shape[1], right_img.shape[1]-right_bbox_img_int[idx, 0])
-            right_img[ right_bbox_img_int[idx, 1]:right_bbox_img_int[idx, 1]+max_bbox_h, right_bbox_img_int[idx, 0]:right_bbox_img_int[idx, 0]+max_bbox_w ] = right_warped_img[:max_bbox_h, :max_bbox_w]
+            
+            # ----------------------------------------------------------------------------------------------------------------------------------------------
+            ### modified
+            if self.seg:#TODO
+                right_warped_mask = np.repeat(right_warped_mask[:, :, np.newaxis], 3, axis=2)
+                reversed_right_segmentation_mask = np.abs(right_warped_mask.astype(np.int)-1)
+                right_img[ right_bbox_img_int[idx, 1]:right_bbox_img_int[idx, 1]+max_bbox_h, right_bbox_img_int[idx, 0]:right_bbox_img_int[idx, 0]+max_bbox_w ] \
+                    = right_img[ right_bbox_img_int[idx, 1]:right_bbox_img_int[idx, 1]+max_bbox_h, right_bbox_img_int[idx, 0]:right_bbox_img_int[idx, 0]+max_bbox_w ] * reversed_right_segmentation_mask[:max_bbox_h,:max_bbox_w] \
+                    + (right_warped_img * right_warped_mask)[:max_bbox_h,:max_bbox_w]
+            else:
+                right_img[ right_bbox_img_int[idx, 1]:right_bbox_img_int[idx, 1]+max_bbox_h, right_bbox_img_int[idx, 0]:right_bbox_img_int[idx, 0]+max_bbox_w ] = right_warped_img[:max_bbox_h, :max_bbox_w]
+            ### modified
+            # ----------------------------------------------------------------------------------------------------------------------------------------------
+
             # print(f'right: origin size {right_warped_img.shape[1]}x{right_warped_img.shape[0]} final cropped box size{max_bbox_w}x{max_bbox_h}')
 
+        # ----------------------------------------------------------------------------------------------------------------------------------------------
         if self.sampler_cfg.get('remove_overlapped', True):
-            points = points[non_overlapped_mask]
+            if self.seg:
+                pts_rect = calib.lidar_to_rect(points)
+                project_points = points_to_depth_map(pts_rect, (left_img.shape[0], left_img.shape[1]), calib)
+                selecet_points = points_select_mask * project_points
+                points = unproject_depth(selecet_points, calib)
+            else:
+                points = points[non_overlapped_mask]
+        # ----------------------------------------------------------------------------------------------------------------------------------------------
 
         sampled_gt_boxes = sampled_gt_boxes[sampled_mask]
         total_valid_sampled_dict = [total_valid_sampled_dict[idx] for idx in np.nonzero(sampled_mask)[0]]
