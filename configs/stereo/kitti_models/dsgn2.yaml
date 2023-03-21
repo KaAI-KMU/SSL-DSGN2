@@ -286,6 +286,7 @@ MODEL:
         LOSS_TYPE: {'ce': 1.0}
         WEIGHTS: [1.0]  # [1.0, 1.0]
 
+<<<<<<< Updated upstream
     ROI_HEAD:
         NAME: SECONDHead
         CLASS_AGNOSTIC: True
@@ -341,6 +342,8 @@ MODEL:
         LOSS_WEIGHTS: 0
         DP_RATIO: 0.3
 
+=======
+>>>>>>> Stashed changes
     POST_PROCESSING:
         RECALL_THRESH_LIST: [0.3, 0.5, 0.7]
         SCORE_THRESH: 0.1
