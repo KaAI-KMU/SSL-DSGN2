@@ -25,7 +25,7 @@ def class_agnostic_nms(box_scores, box_preds, nms_config, score_thresh=None):
     return selected, src_box_scores[selected]
 
 
-def multi_classes_nms(cls_scores, box_preds, nms_config, score_thresh=None, label_preds=None):
+def multi_classes_nms(cls_scores, box_preds, iou_preds, nms_config, score_thresh=None, label_preds=None):
     """
     Args:
         cls_scores: (N, num_class)
@@ -36,7 +36,7 @@ def multi_classes_nms(cls_scores, box_preds, nms_config, score_thresh=None, labe
     Returns:
 
     """
-    pred_scores, pred_labels, pred_boxes = [], [], []
+    pred_scores, pred_labels, pred_boxes, pred_iou = [], [], [], []
     for k in range(cls_scores.shape[1] if label_preds is None else label_preds.max().item()):
         if score_thresh is not None:
             if label_preds is None:
@@ -64,9 +64,11 @@ def multi_classes_nms(cls_scores, box_preds, nms_config, score_thresh=None, labe
         pred_scores.append(box_scores[selected])
         pred_labels.append(box_scores.new_ones(len(selected)).long() * k)
         pred_boxes.append(cur_box_preds[selected])
+        pred_iou.append(iou_preds[selected])
 
     pred_scores = torch.cat(pred_scores, dim=0)
     pred_labels = torch.cat(pred_labels, dim=0)
     pred_boxes = torch.cat(pred_boxes, dim=0)
+    pred_iou = torch.cat(pred_iou, dim=0)
 
-    return pred_scores, pred_labels, pred_boxes
+    return pred_scores, pred_labels, pred_boxes, pred_iou

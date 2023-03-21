@@ -287,7 +287,6 @@ class StereoDetector3DTemplate(nn.Module):
 
             if not isinstance(batch_dict['batch_cls_preds'], list):
                 cls_preds = batch_dict['batch_cls_preds'][batch_mask]
-
                 src_cls_preds = cls_preds
                 assert cls_preds.shape[1] in [1, self.num_class]
 
@@ -299,16 +298,16 @@ class StereoDetector3DTemplate(nn.Module):
             #     src_cls_preds = cls_preds
             #     if not batch_dict['cls_preds_normalized']:
             #         cls_preds = [torch.sigmoid(x) for x in cls_preds]
-
+            ROI_HEAD = False
             if self.roi_head is not None and not isinstance(batch_dict['batch_iou_preds'], list):
                 iou_preds = batch_dict['batch_iou_preds'][batch_mask]
-
                 src_iou_preds = iou_preds
 
                 if not batch_dict['iou_preds_normalized']:
                     iou_preds = torch.sigmoid(iou_preds)                    
             else:
                 if self.roi_head is not None:
+                    ROI_HEAD = True
                     iou_preds = [x[batch_mask]
                                 for x in batch_dict['batch_iou_preds']]
                     src_iou_preds = iou_preds
@@ -331,28 +330,29 @@ class StereoDetector3DTemplate(nn.Module):
                     label_preds = None
 
                 cur_start_idx = 0
-                pred_scores, pred_labels, pred_boxes = [], [], []
+                pred_scores, pred_labels, pred_boxes, pred_iou = [], [], [], []
                 for cur_cls_preds, cur_label_mapping in zip(cls_preds, multihead_label_mapping):
                     # assert cur_cls_preds.shape[1] == len(cur_label_mapping)
                     cur_box_preds = box_preds[cur_start_idx: cur_start_idx + cur_cls_preds.shape[0]]
                     cur_label_preds = label_preds[cur_start_idx: cur_start_idx + cur_cls_preds.shape[0]] if label_preds is not None else None
-                    cur_pred_scores, cur_pred_labels, cur_pred_boxes = model_nms_utils.multi_classes_nms(
-                        cls_scores=cur_cls_preds, box_preds=cur_box_preds,
+                    cur_pred_scores, cur_pred_labels, cur_pred_boxes, cur_pred_iou = model_nms_utils.multi_classes_nms(
+                        cls_scores=cur_cls_preds, box_preds=cur_box_preds, iou_preds=iou_preds,
                         nms_config=post_process_cfg.NMS_CONFIG,
                         score_thresh=post_process_cfg.SCORE_THRESH,
                         label_preds=cur_label_preds
                     )
+                    
                     cur_pred_labels = cur_label_mapping[cur_pred_labels]
                     pred_scores.append(cur_pred_scores)
                     pred_labels.append(cur_pred_labels)
                     pred_boxes.append(cur_pred_boxes)
                     cur_start_idx += cur_cls_preds.shape[0]
+                    pred_iou.append(cur_pred_iou)
 
                 final_scores = torch.cat(pred_scores, dim=0)
                 final_labels = torch.cat(pred_labels, dim=0)
                 final_boxes = torch.cat(pred_boxes, dim=0)
-                if self.roi_head is not None:
-                    final_iou_scores = iou_preds[selected]
+                final_iou_scores = torch.cat(pred_iou, dim=0)
             else:
                 cls_preds, label_preds = torch.max(cls_preds, dim=-1)
                 iou_preds, iou_label_preds = torch.max(iou_preds, dim=-1)
@@ -384,10 +384,8 @@ class StereoDetector3DTemplate(nn.Module):
                 'pred_labels': final_labels,
             }
             if self.roi_head is not None:
-                record_dict = {
-                    'pred_cls_scores': final_cls_scores,
-                    'pred_iou_scores': final_iou_scores                    
-                }
+                record_dict['pred_iou_scores'] = final_iou_scores
+                # record_dict['pred_cls_scores'] = final_cls_scores
 
             recall_dict, iou_results, ioubev_results = self.generate_recall_record(
                 box_preds=final_boxes if 'rois' not in batch_dict else src_box_preds,
