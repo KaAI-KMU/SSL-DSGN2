@@ -298,7 +298,6 @@ class StereoDetector3DTemplate(nn.Module):
             #     src_cls_preds = cls_preds
             #     if not batch_dict['cls_preds_normalized']:
             #         cls_preds = [torch.sigmoid(x) for x in cls_preds]
-            ROI_HEAD = False
             if self.roi_head is not None and not isinstance(batch_dict['batch_iou_preds'], list):
                 iou_preds = batch_dict['batch_iou_preds'][batch_mask]
                 src_iou_preds = iou_preds
@@ -307,7 +306,6 @@ class StereoDetector3DTemplate(nn.Module):
                     iou_preds = torch.sigmoid(iou_preds)                    
             else:
                 if self.roi_head is not None:
-                    ROI_HEAD = True
                     iou_preds = [x[batch_mask]
                                 for x in batch_dict['batch_iou_preds']]
                     src_iou_preds = iou_preds
