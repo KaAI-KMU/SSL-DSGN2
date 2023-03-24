@@ -338,12 +338,12 @@ MODEL:
     DEPTH_CONFIDENCE_MODULE:
         NAME: CCNN
         FC_FILTERS: 128
-        LOSS_WEIGHTS: 1
+        LOSS_WEIGHTS: 1.0
         DP_RATIO: 0.3
 
         TOP_K_VOLUMES:
             TOP_K: 7
-            FLATNESS_OF_COST: 5
+            FLATNESS_OF_COST: 0.05
 
 
     POST_PROCESSING:

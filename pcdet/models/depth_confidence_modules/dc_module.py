@@ -60,11 +60,12 @@ class CCNN(nn.Module):
         flatness = self.model_cfg.TOP_K_VOLUMES.FLATNESS_OF_COST
         k = self.model_cfg.TOP_K_VOLUMES.TOP_K
 
-        rep_volumes = torch.exp((-1)*depth_volumes/flatness)
-        prob_volumes = rep_volumes / torch.sum(rep_volumes, dim=1)
+        rep_volumes = (-1)*depth_volumes/flatness
+        volumes_norm = nn.Softmax(dim=1)
+        prob_volumes = volumes_norm(rep_volumes)
         prob_volumes, volume_index = torch.sort(prob_volumes, dim=1, descending=True)
         topk_volumes = prob_volumes[:,:k,:,:]
-        
+
         return topk_volumes
         
     def forward(self, batch_dict):
@@ -89,7 +90,8 @@ class CCNN(nn.Module):
             #     acc = calculate_accuracy(batch_dict)
             #     epoch_acc += acc.item() * depth_volumes.size(0)
             #     batch_dict["depth_confidence_module_acc"] = epoch_acc
-
+            
+            #show confidence map image
             show = False
             if show:
                 showConfidenceMap(batch_dict)
