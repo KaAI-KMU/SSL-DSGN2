@@ -75,7 +75,7 @@ class CCNN(nn.Module):
             topk_volumes = self.top_k_volumes(depth_volumes)
 
             out = self.conv(topk_volumes)
-            # out = self.fc(depth_volumes)            
+            # out = self.fc(depth_volumes)
             out = self.activate(out)
 
             batch_dict['batch_feature_depth'] = out
