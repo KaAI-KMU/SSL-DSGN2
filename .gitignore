@@ -18,3 +18,9 @@ pcdet/config.py
 .vscode/launch.json
 setup.py
 =20.3
+
+
+outputs/
+last_save_checkpoints/
+.hypothesis/unicode_data/12.1.0/charmap.json.gz
+
