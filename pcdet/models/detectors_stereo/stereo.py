@@ -10,6 +10,7 @@ class STEREO(StereoDetector3DTemplate):
         self.module_list = self.build_networks()
 
     def forward(self, batch_dict):
+        batch_dict['dataset_cfg'] = self.dataset.dataset_cfg
         with T(self.__module__.split('.')[-1], record=True, enable=not self.training):
             for cur_module in self.module_list:
                 with T(cur_module.__module__.split('.')[-1], enable=not self.training):
@@ -110,6 +111,11 @@ class STEREO(StereoDetector3DTemplate):
             loss_rcnn, tb_dict = self.roi_head.get_loss(tb_dict)
             tb_dict['loss_rcnn'] = loss_rcnn.item()
             loss += loss_rcnn
+
+        if self.model_cfg.get('DEPTH_CONFIDENCE_MODULE', None):
+            loss_dcm, tb_dict = self.depth_confidence_module.get_loss(tb_dict)
+            tb_dict['loss_dcm'] = loss_dcm.item()
+            loss += loss_dcm
 
         return loss, tb_dict, disp_dict
 
