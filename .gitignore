@@ -127,12 +127,14 @@ work_dirs/
 
 
 # add
-pcdet/models/depth_confidence_modules/__pycache__/__init__.cpython-37.pyc
-pcdet/models/depth_confidence_modules/__pycache__/dc_module.cpython-37.pyc
-pcdet/models/roi_heads/__pycache__/__init__.cpython-37.pyc
-pcdet/models/roi_heads/__pycache__/roi_head_template.cpython-37.pyc
-pcdet/models/roi_heads/__pycache__/second_head.cpython-37.pyc
-pcdet/models/roi_heads/target_assigner/__pycache__/__init__.cpython-37.pyc
-pcdet/models/roi_heads/target_assigner/__pycache__/proposal_target_layer.cpython-37.pyc
+/pcdet/models/depth_confidence_modules/__pycache__/__init__.cpython-37.pyc
+/pcdet/models/depth_confidence_modules/__pycache__/dc_module.cpython-37.pyc
+/pcdet/models/roi_heads/__pycache__/__init__.cpython-37.pyc
+/pcdet/models/roi_heads/__pycache__/roi_head_template.cpython-37.pyc
+/pcdet/models/roi_heads/__pycache__/second_head.cpython-37.pyc
+/pcdet/models/roi_heads/target_assigner/__pycache__/__init__.cpython-37.pyc
+/pcdet/models/roi_heads/target_assigner/__pycache__/proposal_target_layer.cpython-37.pyc
+/last_save_checkpoints/
+/outputs/
 
 
