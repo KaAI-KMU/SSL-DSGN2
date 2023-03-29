@@ -140,9 +140,9 @@ class SECONDHead(RoIHeadTemplate):
         rcnn_iou = self.iou_layers(shared_features).transpose(1, 2).contiguous().squeeze(dim=1)  # (B*N, 1)
 
         if not self.training:
-            batch_dict['batch_cls_preds'] = batch_dict['roi_scores'].view(batch_dict['batch_size'], -1, rcnn_iou.shape[-1])
-            # batch_dict['batch_cls_preds'] = rcnn_iou.view(batch_dict['batch_size'], -1, rcnn_iou.shape[-1])
-            batch_dict['batch_box_preds'] = batch_dict['rois']
+            batch_dict['batch_cls_preds'] = batch_dict['roi_scores'].view(batch_dict['batch_size'], -1, rcnn_iou.shape[-1]) # batch_dict['batch_cls_preds'].shape = [1, 525312, 3] -> [1, 100, 1]
+            # batch_dict['batch_cls_preds'] = rcnn_iou.view(batch_dict['batch_size'], -1, rcnn_iou.shape[-1]) # batch_dict['batch_cls_preds'].shape = [1, 525312, 3] -> [1, 100, 1]
+            batch_dict['batch_box_preds'] = batch_dict['rois'] # batch_dict['batch_box_preds'].shape = [1, 525312, 7] -> [1, 100, 7]
             batch_dict['cls_preds_normalized'] = False
             batch_dict['batch_iou_preds'] = rcnn_iou.view(batch_dict['batch_size'], -1, rcnn_iou.shape[-1])
             batch_dict['iou_preds_normalized'] = False
