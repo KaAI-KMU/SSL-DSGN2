@@ -1,10 +1,8 @@
 // Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-
-#include <THC/THC.h>
-#include <THC/THCAtomics.cuh>
-#include <THC/THCDeviceUtils.cuh>
+#include <ATen/cuda/Atomic.cuh>
 
 // TODO make it in a common file
 #define CUDA_1D_KERNEL_LOOP(i, n)                            \
@@ -229,11 +227,12 @@ at::Tensor BuildCostVolume_forward_cuda(const at::Tensor& left,
   auto output_size = num_batch * channels * 2 * max_disp * height * width;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  dim3 grid(std::min(THCCeilDiv((long)(output_size / 2), 512L), 4096L));
+  // dim3 grid(std::min(THCCeilDiv((long)(output_size / 2), 512L), 4096L));
+  dim3 grid(std::min(((long)(output_size / 2) + 512L - 1) / 512L , 4096L));
   dim3 block(512);
 
   if (output.numel() == 0) {
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
     return output;
   }
 
@@ -251,7 +250,7 @@ at::Tensor BuildCostVolume_forward_cuda(const at::Tensor& left,
          output.data<scalar_t>(),
          downsample);
   });
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
   return output;
 }
 
@@ -275,12 +274,13 @@ std::tuple<at::Tensor, at::Tensor> BuildCostVolume_backward_cuda(const at::Tenso
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  dim3 grid(std::min(THCCeilDiv((long)grad.numel(), 512L), 4096L));
+  // dim3 grid(std::min(THCCeilDiv((long)grad.numel(), 512L), 4096L));
+  dim3 grid(std::min(((long)grad.numel() + 512L - 1) / 512L, 4096L));
   dim3 block(512);
 
   // handle possibly empty gradients
   if (grad.numel() == 0) {
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
     return std::make_tuple(grad_left, grad_right);
   }
 
@@ -298,7 +298,7 @@ std::tuple<at::Tensor, at::Tensor> BuildCostVolume_backward_cuda(const at::Tenso
          grad_right.data<scalar_t>(),
          downsample);
   });
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
   return std::make_tuple(grad_left, grad_right);
 }
 
