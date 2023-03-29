@@ -1,5 +1,6 @@
 import torch
-from torch._six import container_abcs, istuple
+# from torch._six import container_abcs, istuple
+import collections.abc as container_abcs
 
 from itertools import product
 

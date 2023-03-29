@@ -3,7 +3,6 @@
 
 from functools import partial
 import spconv.pytorch as spconv
-# import spconv
 import torch.nn as nn
 import warnings
 import torch.distributed as dist
