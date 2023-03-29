@@ -138,3 +138,7 @@ work_dirs/
 /outputs/
 
 
+pcdet/models/depth_confidence_modules/__pycache__/dc_module.cpython-37.pyc
+pcdet/models/roi_heads/__pycache__/__init__.cpython-37.pyc
+pcdet/models/depth_confidence_modules/__pycache__/__init__.cpython-37.pyc
+pcdet/models/depth_confidence_modules/__pycache__/__init__.cpython-37.pyc
