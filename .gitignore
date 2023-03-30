@@ -17,3 +17,7 @@ version.py
 pcdet/config.py
 .vscode/launch.json
 setup.py
+
+last_save_checkpoints/
+outputs/
+.hypothesis/
