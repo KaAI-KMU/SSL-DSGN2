@@ -17,6 +17,7 @@ version.py
 pcdet/config.py
 .vscode/launch.json
 setup.py
+<<<<<<< HEAD
 =20.3
 
 
@@ -24,3 +25,5 @@ outputs/
 last_save_checkpoints/
 .hypothesis/unicode_data/12.1.0/charmap.json.gz
 
+=======
+>>>>>>> 40087af2a84363ef14536f067b617b181e920da9
