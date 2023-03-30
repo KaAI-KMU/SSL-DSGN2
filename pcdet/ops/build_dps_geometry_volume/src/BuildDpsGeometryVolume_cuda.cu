@@ -3,7 +3,6 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/Atomic.cuh>
 
-
 // TODO make it in a common file
 #define CUDA_1D_KERNEL_LOOP(i, n)                            \
   for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; \
@@ -14,6 +13,7 @@ template <typename T>
 __device__ T bilinear_interpolate(const T* bottom_data,
     const int height, const int width,
     T y, T x) {
+
 
   // deal with cases that inverse elements are out of feature map boundary
   if (y < -1.0 || y > height || x < -1.0 || x > width) {
