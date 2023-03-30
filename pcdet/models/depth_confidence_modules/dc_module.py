@@ -16,27 +16,33 @@ class CCNN(nn.Module):
         filters = 64
         fc_filters = self.model_cfg.FC_FILTERS
         padding = kernel_size // 2
+        k = self.model_cfg.TOP_K_VOLUMES.TOP_K
 
         self.conv = nn.Sequential(
             # nn.Conv2d(288, 124, kernel_size, stride=1, padding=padding),
             # nn.ReLU(),
             # nn.Conv2d(288, filters, kernel_size, stride=1, padding=padding),
-            nn.Conv2d(1, filters, kernel_size, stride=1, padding=padding),
+            # nn.Conv2d(1, filters, kernel_size, stride=1, padding=padding),
+            # nn.ReLU(),
+            # nn.Conv2d(filters, filters, kernel_size, stride=1, padding=padding),
+            # nn.ReLU(),
+            # nn.Conv2d(filters, filters, kernel_size, stride=1, padding=padding),
+            # nn.ReLU(),
+            # nn.Conv2d(filters, filters, kernel_size, stride=1, padding=padding),
+            # nn.ReLU(),
+            nn.Conv2d(k, 128, kernel_size, stride=1, padding=padding),
             nn.ReLU(),
-            nn.Conv2d(filters, filters, kernel_size, stride=1, padding=padding),
+            nn.Conv2d(128, filters, kernel_size, stride=1, padding=padding),
             nn.ReLU(),
-            nn.Conv2d(filters, filters, kernel_size, stride=1, padding=padding),
-            nn.ReLU(),
-            nn.Conv2d(filters, filters, kernel_size, stride=1, padding=padding),
-            nn.ReLU(),
+            nn.Conv2d(filters, 1, kernel_size, stride=1, padding=padding),
         )
-        self.fc = nn.Sequential(
-            nn.Conv2d(288, fc_filters, 1),
-            nn.ReLU(),
-            nn.Conv2d(fc_filters, 1, 1),
+        # self.fc = nn.Sequential(
+        #     nn.Conv2d(288, fc_filters, 1),
+        #     nn.ReLU(),
+        #     nn.Conv2d(fc_filters, 1, 1),
             # nn.ReLU(),
             # nn.Conv2d(fc_filters, 1, 1),
-        )
+        # )
         self.activate = nn.Sigmoid()
     
     def gt_depth_confidence_map(self, batch_dict):   
@@ -54,14 +60,29 @@ class CCNN(nn.Module):
         confidence_map_label = torch.cat(batch_cf_map_label, dim=0)
 
         return confidence_map_label, valid_pixels_mask
+    
+    def top_k_volumes(self, depth_volumes):
+        flatness = self.model_cfg.TOP_K_VOLUMES.FLATNESS_OF_COST
+        k = self.model_cfg.TOP_K_VOLUMES.TOP_K
+
+        rep_volumes = (-1)*depth_volumes/flatness
+        volumes_norm = nn.Softmax(dim=1)
+        prob_volumes = volumes_norm(rep_volumes)
+        prob_volumes, volume_index = torch.sort(prob_volumes, dim=1, descending=True)
+        topk_volumes = prob_volumes[:,:k,:,:]
+
+        return topk_volumes
         
     def forward(self, batch_dict):
         batch_size = batch_dict['batch_size']
         for i in range(batch_size):
             depth_volumes = batch_dict["depth_volumes"][i]
             # out = self.conv(input)
-            out = self.fc(depth_volumes)
+            # out = self.fc(depth_volumes)
             # out = (out - out.min(dim=1).values) / (out.max(dim=1).values - out.min(dim=1).values)
+            topk_volumes = self.top_k_volumes(depth_volumes)
+
+            out = self.conv(topk_volumes)
             out = self.activate(out)
 
             batch_dict['batch_feature_depth'] = out
