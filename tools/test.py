@@ -16,6 +16,8 @@ from pcdet.utils import common_utils
 
 torch.backends.cudnn.benchmark = True
 
+from tensorboardX import SummaryWriter
+
 
 def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
@@ -40,6 +42,9 @@ def parse_config():
     parser.add_argument('--set', dest='set_cfgs', default=None, nargs=argparse.REMAINDER, help='set extra config keys if needed')
     parser.add_argument('--trainval', action='store_true', default=False, help='')
     parser.add_argument('--imitation', type=str, default="2d")
+    # log tensorboard
+    parser.add_argument('--eval_all', action='store_true', default=False, help='whether to evaluate all checkpoints')
+    parser.add_argument('--ckpt_dir', type=str, default=None, help='specify a ckpt directory to be evaluated if needed')
 
     args = parser.parse_args()
 
@@ -50,7 +55,7 @@ def parse_config():
 
     np.random.seed(1024)
 
-    assert args.ckpt or args.ckpt_id, "pls specify ckpt or ckpt_dir or ckpt_id"
+    # assert args.ckpt or args.ckpt_id, "pls specify ckpt or ckpt_dir or ckpt_id"
 
     if args.set_cfgs is not None:
         cfg_from_list(args.set_cfgs, cfg)
@@ -95,8 +100,8 @@ def repeat_eval_ckpt(model, test_loader, args, eval_output_dir, logger, ckpt_dir
         pass
 
     # tensorboard log
-    # if cfg.LOCAL_RANK == 0:
-    #     tb_log = SummaryWriter(log_dir=str(eval_output_dir / ('tensorboard_%s' % cfg.DATA_CONFIG.DATA_SPLIT['test'])))
+    if cfg.LOCAL_RANK == 0:
+        tb_log = SummaryWriter(log_dir=str(eval_output_dir / ('tensorboard_%s' % cfg.DATA_CONFIG.DATA_SPLIT['test'])))
     total_time = 0
     first_eval = True
 
@@ -155,15 +160,17 @@ def main():
         assert args.batch_size % total_gpus == 0, 'Batch size should match the number of gpus'
         args.batch_size = args.batch_size // total_gpus
 
-    if args.ckpt_id:
-        assert args.exp_name
-        output_dir = cfg.ROOT_DIR / 'outputs' / cfg.EXP_GROUP_PATH / (cfg.TAG + '.' + args.exp_name)
-        args.ckpt = str(output_dir / 'ckpt' / 'checkpoint_epoch_{}.pth'.format(args.ckpt_id))
-    elif args.ckpt:
-        output_dir = Path(args.ckpt + ".eval")
-        output_dir.mkdir(parents=True, exist_ok=True)
-    else:
-        raise ValueError("no ckpt specified")
+    # if args.ckpt_id:
+    #     assert args.exp_name
+    #     output_dir = cfg.ROOT_DIR / 'outputs' / cfg.EXP_GROUP_PATH / (cfg.TAG + '.' + args.exp_name)
+    #     args.ckpt = str(output_dir / 'ckpt' / 'checkpoint_epoch_{}.pth'.format(args.ckpt_id))
+    # elif args.ckpt:
+    #     output_dir = Path(args.ckpt + ".eval")
+    #     output_dir.mkdir(parents=True, exist_ok=True)
+    # else:
+    #     raise ValueError("no ckpt specified")
+
+    output_dir = cfg.ROOT_DIR / 'outputs' / cfg.EXP_GROUP_PATH / (cfg.TAG + '.' + args.exp_name)
 
     if not os.path.exists(output_dir):
         print('--- ! output_dir does not exist, please check the config file and the extra tag')
@@ -173,7 +180,14 @@ def main():
 
     num_list = re.findall(r'\d+', args.ckpt) if args.ckpt is not None else []
     epoch_id = num_list[-1] if num_list.__len__() > 0 else 'no_number'
-    eval_output_dir = eval_output_dir / ('epoch_%s' % epoch_id) / cfg.DATA_CONFIG.DATA_SPLIT['test']
+    # eval_output_dir = eval_output_dir / ('epoch_%s' % epoch_id) / cfg.DATA_CONFIG.DATA_SPLIT['test']
+
+    if not args.eval_all:
+        num_list = re.findall(r'\d+', args.ckpt) if args.ckpt is not None else []
+        epoch_id = num_list[-1] if num_list.__len__() > 0 else 'no_number'
+        eval_output_dir = eval_output_dir / ('epoch_%s' % epoch_id) / cfg.DATA_CONFIG.DATA_SPLIT['test']
+    else:
+        eval_output_dir = eval_output_dir / 'eval_all_default'
 
     if args.eval_tag is not None:
         eval_output_dir = eval_output_dir / args.eval_tag
@@ -194,6 +208,8 @@ def main():
         logger.info('{:16} {}'.format(key, val))
     log_config_to_file(cfg, logger=logger)
 
+    ckpt_dir = args.ckpt_dir if args.ckpt_dir is not None else output_dir / 'ckpt'
+
     test_set, test_loader, sampler = build_dataloader(
         dataset_cfg=cfg.DATA_CONFIG,
         class_names=cfg.CLASS_NAMES,
@@ -203,7 +219,10 @@ def main():
 
     model = build_network(model_cfg=cfg.MODEL, num_class=len(cfg.CLASS_NAMES), dataset=test_set)
     with torch.no_grad():
-        eval_single_ckpt(model, test_loader, args, eval_output_dir, logger, epoch_id, dist_test=dist_test)
+        if args.eval_all:
+            repeat_eval_ckpt(model, test_loader, args, eval_output_dir, logger, ckpt_dir, dist_test=dist_test)
+        else:
+            eval_single_ckpt(model, test_loader, args, eval_output_dir, logger, epoch_id, dist_test=dist_test)
 
 
 if __name__ == '__main__':
