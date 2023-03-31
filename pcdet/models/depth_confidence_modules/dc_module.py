@@ -32,8 +32,10 @@ class CCNN(nn.Module):
             # nn.ReLU(),
             nn.Conv2d(k, 128, kernel_size, stride=1, padding=padding),
             nn.ReLU(),
+            nn.Dropout(self.model_cfg.DP_RATIO),
             nn.Conv2d(128, filters, kernel_size, stride=1, padding=padding),
             nn.ReLU(),
+            nn.Dropout(self.model_cfg.DP_RATIO),
             nn.Conv2d(filters, 1, kernel_size, stride=1, padding=padding),
         )
         # self.fc = nn.Sequential(
